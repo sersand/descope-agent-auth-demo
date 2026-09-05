@@ -1,4 +1,4 @@
-﻿{
+{
   "client_id": "https://sersand.github.io/descope-agent-auth-demo/client-metadata.json",
   "client_name": "Weather MCP Inspector Client",
   "redirect_uris": [

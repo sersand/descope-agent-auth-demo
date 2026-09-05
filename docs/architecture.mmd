@@ -1,0 +1,19 @@
+flowchart LR
+    I["MCP Inspector 2.5.0"]
+    M["Remote MCP server<br/>Render"]
+    P["Protected Resource Metadata"]
+    D["Descope OAuth discovery"]
+    C["Public CIMD document<br/>GitHub Pages"]
+    A["Descope authorization<br/>login and consent"]
+    W["Open-Meteo API"]
+
+    I -->|"POST /mcp"| M
+    M -->|"401 + resource_metadata"| I
+    I -->|"discover"| P
+    P -->|"authorization_servers"| D
+    I -->|"client_id = HTTPS metadata URL"| C
+    I -->|"authorization code + PKCE"| A
+    A -->|"access + refresh tokens"| I
+    I -->|"Bearer token"| M
+    M -->|"aud + scope validation"| M
+    M -->|"get_weather"| W

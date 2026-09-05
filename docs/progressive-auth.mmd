@@ -1,0 +1,19 @@
+sequenceDiagram
+    participant I as MCP Inspector
+    participant M as Remote MCP server
+    participant D as Descope
+
+    I->>D: Authorize openid weather:read
+    D-->>I: Access token with weather:read
+    I->>M: get_weather
+    M-->>I: 200 weather result
+
+    I->>M: create_weather_alert
+    M-->>I: 403 insufficient_scope<br/>scope="weather:read weather:alerts"
+
+    I->>D: Reauthorize union of scopes
+    D-->>I: Consent for weather:alerts
+    D-->>I: Access token with both scopes
+
+    I->>M: Retry create_weather_alert
+    M-->>I: 200 alert created

@@ -172,7 +172,7 @@ app.use("/mcp", (req, res, next) => {
 
   res.setHeader(
     "Access-Control-Allow-Methods",
-    "POST, GET, DELETE, OPTIONS",
+    "POST, OPTIONS",
   );
 
   res.setHeader(
@@ -198,6 +198,18 @@ app.use("/mcp", (req, res, next) => {
 
   next();
 });
+
+// The resource server publishes Protected Resource Metadata.
+// Authorization Server metadata is discovered from the Descope
+// issuer listed in that document, not from this resource origin.
+app.get(
+  "/.well-known/oauth-authorization-server",
+  (_req, res) => {
+    return res.status(404).json({
+      error: "authorization_server_metadata_not_hosted_here",
+    });
+  },
+);
 
 // Resource-server metadata and bearer authentication.
 // Descope remains the authorization server.
@@ -237,3 +249,5 @@ app.listen(port, "0.0.0.0", () => {
   console.log(`MCP server listening on port ${port}`);
   console.log(`MCP resource: ${serverUrl}`);
 });
+
+

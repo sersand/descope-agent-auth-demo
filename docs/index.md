@@ -1,3 +1,3 @@
-﻿# Descope Agent Authentication Demo
+# Descope Agent Authentication Demo
 
 CIMD metadata for the MCP Inspector spike.

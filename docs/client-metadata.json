@@ -1,14 +1,16 @@
 {
-  "client_id": "https://sersand.github.io/descope-agent-auth-demo/client-metadata.json",
-  "client_name": "Weather MCP Inspector Client",
-  "redirect_uris": [
-    "http://127.0.0.1:6274/oauth/callback"
-  ],
-  "grant_types": [
-    "authorization_code"
-  ],
-  "response_types": [
-    "code"
-  ],
-  "token_endpoint_auth_method": "none"
+    "client_id":  "https://sersand.github.io/descope-agent-auth-demo/client-metadata.json",
+    "client_name":  "Weather MCP Inspector Client",
+    "redirect_uris":  [
+                          "http://127.0.0.1:6274/oauth/callback",
+                          "http://localhost:6274/oauth/callback"
+                      ],
+    "grant_types":  [
+                        "authorization_code"
+                    ],
+    "response_types":  [
+                           "code"
+                       ],
+    "token_endpoint_auth_method":  "none",
+    "client_uri":  "https://sersand.github.io/descope-agent-auth-demo/"
 }

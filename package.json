@@ -1,20 +1,23 @@
 {
   "name": "descope-agent-auth-spike",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Remote MCP authentication demo using Descope, CIMD, and progressive OAuth scopes",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "start": "node server.js",
+    "check": "node --check server.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
   "dependencies": {
-    "@descope/mcp-express": "^1.6.0",
+    "@descope/mcp-express": "1.6.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "zod": "^4.4.3"
+  },
+  "engines": {
+    "node": "24.x"
   }
 }

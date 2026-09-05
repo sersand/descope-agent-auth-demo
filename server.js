@@ -10,14 +10,57 @@ import { z } from "zod";
 
 const app = express();
 
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
+
+const rawServerUrl = process.env.SERVER_URL;
+const discoveryUrl =
+  process.env.DESCOPE_MCP_SERVER_WELL_KNOWN_URL;
+
+if (!rawServerUrl) {
+  throw new Error("SERVER_URL is required");
+}
+
+if (!discoveryUrl) {
+  throw new Error(
+    "DESCOPE_MCP_SERVER_WELL_KNOWN_URL is required",
+  );
+}
+
+const serverUrl = rawServerUrl.replace(/\/+$/, "");
+
+if (!serverUrl.endsWith("/mcp")) {
+  throw new Error("SERVER_URL must end with /mcp");
+}
+
+const TOOL_SCOPES = Object.freeze({
+  hello: ["weather:read"],
+  create_alert_test: ["weather:alerts"],
+});
 
 const provider = new DescopeMcpProvider({
-  serverUrl: process.env.SERVER_URL,
-  descopeMcpServerWellKnownUrl:
-    process.env.DESCOPE_MCP_SERVER_WELL_KNOWN_URL,
+  serverUrl,
+  descopeMcpServerWellKnownUrl: discoveryUrl,
+
+  // @descope/mcp-express 1.6.0 currently accepts
+  // a single audience value at runtime.
   verifyTokenOptions: {
-    audience: process.env.SERVER_URL,
+    audience: serverUrl,
+  },
+
+  // The SDK also uses these values when publishing
+  // Protected Resource Metadata.
+  dynamicClientRegistrationOptions: {
+    attributeScopes: [],
+    permissionScopes: [
+      {
+        name: "weather:read",
+        description: "Read current weather information",
+      },
+      {
+        name: "weather:alerts",
+        description: "Create weather alerts",
+      },
+    ],
   },
 });
 
@@ -27,7 +70,7 @@ const hello = defineTool({
   input: {
     name: z.string().optional(),
   },
-  scopes: ["weather:read"],
+  scopes: TOOL_SCOPES.hello,
   handler: async ({ name }, extra) => ({
     content: [
       {
@@ -43,11 +86,12 @@ const hello = defineTool({
 
 const createAlertTest = defineTool({
   name: "create_alert_test",
-  description: "Test progressive authorization for weather alerts",
+  description:
+    "Test progressive authorization for weather alerts",
   input: {
     city: z.string(),
   },
-  scopes: ["weather:alerts"],
+  scopes: TOOL_SCOPES.create_alert_test,
   handler: async ({ city }, extra) => ({
     content: [
       {
@@ -61,37 +105,41 @@ const createAlertTest = defineTool({
   }),
 });
 
-const toolScopes = {
-  create_alert_test: ["weather:alerts"],
-};
-
 function progressiveScopeChallenge(req, res, next) {
-  if (req.body?.method !== "tools/call") {
+  if (
+    !req.body ||
+    Array.isArray(req.body) ||
+    req.body.method !== "tools/call"
+  ) {
     return next();
   }
 
   const toolName = req.body?.params?.name;
-  const requiredScopes = toolScopes[toolName] ?? [];
-  const userScopes = req.auth?.scopes ?? [];
+  const requiredScopes = TOOL_SCOPES[toolName] ?? [];
+  const grantedScopes = req.auth?.scopes ?? [];
 
   const missingScopes = requiredScopes.filter(
-    (scope) => !userScopes.includes(scope),
+    (scope) => !grantedScopes.includes(scope),
   );
 
   if (!missingScopes.length) {
     return next();
   }
 
+  const requestedScopes = [
+    ...new Set([...grantedScopes, ...requiredScopes]),
+  ];
+
   const resourceMetadataUrl = new URL(
     "/.well-known/oauth-protected-resource",
-    process.env.SERVER_URL,
+    serverUrl,
   ).href;
 
   res.setHeader(
     "WWW-Authenticate",
     `Bearer error="insufficient_scope", ` +
       `error_description="Additional authorization required", ` +
-      `scope="${missingScopes.join(" ")}", ` +
+      `scope="${requestedScopes.join(" ")}", ` +
       `resource_metadata="${resourceMetadataUrl}"`,
   );
 
@@ -102,20 +150,29 @@ function progressiveScopeChallenge(req, res, next) {
   });
 }
 
-/*
- * Inspector runs at http://127.0.0.1:6274.
- * Handle browser CORS before Descope bearer authentication,
- * especially the unauthenticated OPTIONS preflight.
- */
+const ALLOWED_ORIGINS = new Set([
+  "http://127.0.0.1:6274",
+  "http://localhost:6274",
+]);
+
 app.use("/mcp", (req, res, next) => {
-  res.setHeader(
-    "Access-Control-Allow-Origin",
-    "http://127.0.0.1:6274",
-  );
+  const origin = req.headers.origin;
+
+  res.vary("Origin");
+
+  if (origin) {
+    if (!ALLOWED_ORIGINS.has(origin)) {
+      return res.status(403).json({
+        error: "origin_not_allowed",
+      });
+    }
+
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
 
   res.setHeader(
     "Access-Control-Allow-Methods",
-    "POST, OPTIONS",
+    "POST, GET, DELETE, OPTIONS",
   );
 
   res.setHeader(
@@ -132,7 +189,7 @@ app.use("/mcp", (req, res, next) => {
 
   res.setHeader(
     "Access-Control-Expose-Headers",
-    "WWW-Authenticate, MCP-Session-Id",
+    "WWW-Authenticate",
   );
 
   if (req.method === "OPTIONS") {
@@ -142,12 +199,8 @@ app.use("/mcp", (req, res, next) => {
   next();
 });
 
-/*
- * Keep Descope's standard metadata routes.
- *
- * With no toolRegistration callback, this also applies Descope bearer
- * authentication to /mcp and populates req.auth before our custom route.
- */
+// Resource-server metadata and bearer authentication.
+// Descope remains the authorization server.
 app.use(descopeMcpAuthRouter(undefined, provider));
 
 const mcpHandler = createMcpServerHandler(
@@ -168,9 +221,19 @@ app.post(
   mcpHandler,
 );
 
+app.all("/mcp", (req, res) => {
+  res.setHeader("Allow", "POST, OPTIONS");
+
+  return res.status(405).json({
+    error: "method_not_allowed",
+    error_description:
+      `Method "${req.method}" is not supported by this stateless MCP endpoint`,
+  });
+});
+
 const port = process.env.PORT || 3001;
 
 app.listen(port, "0.0.0.0", () => {
   console.log(`MCP server listening on port ${port}`);
-  console.log(`MCP resource: ${process.env.SERVER_URL}`);
+  console.log(`MCP resource: ${serverUrl}`);
 });

@@ -33,8 +33,8 @@ if (!serverUrl.endsWith("/mcp")) {
 }
 
 const TOOL_SCOPES = Object.freeze({
-  hello: ["weather:read"],
-  create_alert_test: ["weather:alerts"],
+  get_weather: ["weather:read"],
+  create_weather_alert: ["weather:alerts"],
 });
 
 const provider = new DescopeMcpProvider({
@@ -64,45 +64,199 @@ const provider = new DescopeMcpProvider({
   },
 });
 
-const hello = defineTool({
-  name: "hello",
-  description: "Test weather read access",
-  input: {
-    name: z.string().optional(),
-  },
-  scopes: TOOL_SCOPES.hello,
-  handler: async ({ name }, extra) => ({
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify({
-          message: `Hello ${name ?? "there"}`,
-          scopes: extra.authInfo.scopes,
-        }),
-      },
-    ],
-  }),
+const weatherDescriptions = Object.freeze({
+  0: "Clear sky",
+  1: "Mainly clear",
+  2: "Partly cloudy",
+  3: "Overcast",
+  45: "Fog",
+  48: "Depositing rime fog",
+  51: "Light drizzle",
+  53: "Moderate drizzle",
+  55: "Dense drizzle",
+  56: "Light freezing drizzle",
+  57: "Dense freezing drizzle",
+  61: "Slight rain",
+  63: "Moderate rain",
+  65: "Heavy rain",
+  66: "Light freezing rain",
+  67: "Heavy freezing rain",
+  71: "Slight snow fall",
+  73: "Moderate snow fall",
+  75: "Heavy snow fall",
+  77: "Snow grains",
+  80: "Slight rain showers",
+  81: "Moderate rain showers",
+  82: "Violent rain showers",
+  85: "Slight snow showers",
+  86: "Heavy snow showers",
+  95: "Thunderstorm",
+  96: "Thunderstorm with slight hail",
+  99: "Thunderstorm with heavy hail",
 });
 
-const createAlertTest = defineTool({
-  name: "create_alert_test",
-  description:
-    "Test progressive authorization for weather alerts",
+async function geocodeCity(city) {
+  const url = new URL(
+    "https://geocoding-api.open-meteo.com/v1/search",
+  );
+
+  url.searchParams.set("name", city);
+  url.searchParams.set("count", "1");
+  url.searchParams.set("language", "en");
+  url.searchParams.set("format", "json");
+
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(
+      `Geocoding request failed with HTTP ${response.status}`,
+    );
+  }
+
+  const data = await response.json();
+  const location = data.results?.[0];
+
+  if (!location) {
+    throw new Error(`No location found for "${city}"`);
+  }
+
+  return location;
+}
+
+async function fetchCurrentWeather(location) {
+  const url = new URL(
+    "https://api.open-meteo.com/v1/forecast",
+  );
+
+  url.searchParams.set("latitude", location.latitude);
+  url.searchParams.set("longitude", location.longitude);
+  url.searchParams.set(
+    "current",
+    [
+      "temperature_2m",
+      "apparent_temperature",
+      "relative_humidity_2m",
+      "precipitation",
+      "weather_code",
+      "wind_speed_10m",
+    ].join(","),
+  );
+  url.searchParams.set("temperature_unit", "fahrenheit");
+  url.searchParams.set("wind_speed_unit", "mph");
+  url.searchParams.set("precipitation_unit", "inch");
+  url.searchParams.set("timezone", "auto");
+
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(
+      `Weather request failed with HTTP ${response.status}`,
+    );
+  }
+
+  const data = await response.json();
+
+  if (!data.current) {
+    throw new Error("Weather response did not include current conditions");
+  }
+
+  return data;
+}
+
+const getWeather = defineTool({
+  name: "get_weather",
+  description: "Get current weather for a city",
   input: {
-    city: z.string(),
+    city: z.string().min(2),
   },
-  scopes: TOOL_SCOPES.create_alert_test,
-  handler: async ({ city }, extra) => ({
-    content: [
-      {
-        type: "text",
-        text: JSON.stringify({
-          message: `Alert created for ${city}`,
-          scopes: extra.authInfo.scopes,
-        }),
-      },
-    ],
-  }),
+  scopes: TOOL_SCOPES.get_weather,
+  handler: async ({ city }, extra) => {
+    try {
+      const location = await geocodeCity(city);
+      const weather = await fetchCurrentWeather(location);
+      const current = weather.current;
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              city: location.name,
+              region: location.admin1 ?? null,
+              country: location.country ?? null,
+              condition:
+                weatherDescriptions[current.weather_code] ??
+                `Weather code ${current.weather_code}`,
+              temperature_f: current.temperature_2m,
+              apparent_temperature_f:
+                current.apparent_temperature,
+              relative_humidity_percent:
+                current.relative_humidity_2m,
+              precipitation_in: current.precipitation,
+              wind_speed_mph: current.wind_speed_10m,
+              observed_at: current.time,
+              timezone: weather.timezone,
+              scopes: extra.authInfo.scopes,
+            }),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              error: "weather_lookup_failed",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Unknown weather lookup error",
+            }),
+          },
+        ],
+      };
+    }
+  },
+});
+
+const weatherAlerts = [];
+
+const createWeatherAlert = defineTool({
+  name: "create_weather_alert",
+  description:
+    "Create a demo weather alert stored in server memory",
+  input: {
+    city: z.string().min(2),
+    condition: z.string().min(2).optional(),
+  },
+  scopes: TOOL_SCOPES.create_weather_alert,
+  handler: async ({ city, condition }, extra) => {
+    const alert = {
+      id: weatherAlerts.length + 1,
+      city,
+      condition: condition ?? "severe weather",
+      created_at: new Date().toISOString(),
+    };
+
+    weatherAlerts.push(alert);
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({
+            message: `Weather alert created for ${city}`,
+            alert,
+            persistence:
+              "In-memory demo only. Alerts are cleared when the server restarts.",
+            scopes: extra.authInfo.scopes,
+          }),
+        },
+      ],
+    };
+  },
 });
 
 function progressiveScopeChallenge(req, res, next) {
@@ -221,8 +375,8 @@ const mcpHandler = createMcpServerHandler(
     version: "1.0.0",
   },
   (server) => {
-    hello(server);
-    createAlertTest(server);
+    getWeather(server);
+    createWeatherAlert(server);
   },
   provider.options,
 );
